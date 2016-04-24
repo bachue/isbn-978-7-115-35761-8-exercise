@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #define LEN_1_KB (1024)
 #define LEN_1_MB (1024 * LEN_1_KB)
@@ -14,11 +15,10 @@ struct linebuf_t {
 
 typedef void (*read_bitmap_file_cb)(long num);
 
-static FILE* init_bitmap_file(const char *, size_t, long);
 static FILE* open_data_file(const char *);
 static long read_num_from_data_file(FILE *, struct linebuf_t *);
 static int set_bitmap_file(FILE *, long);
-static int read_bitmap_file(FILE *, char *, size_t, long, read_bitmap_file_cb);
+static int read_bitmap_file(FILE *, char *, size_t, read_bitmap_file_cb);
 static void output_num(long);
 
 int main(int argc, char const *argv[]) {
@@ -29,8 +29,8 @@ int main(int argc, char const *argv[]) {
     long num;
 
     memset(memory, 0, LEN_1_MB);
-    if ((bitmapfile = init_bitmap_file(memory, LEN_1_MB, 2)) == NULL) {
-        perror("failed in init_bitmap_file()");
+    if ((bitmapfile = tmpfile()) == NULL) {
+        perror("failed in tmpfile()");
         _exit(EXIT_FAILURE);
     }
     if ((datafile = open_data_file("/tmp/data")) == NULL) {
@@ -48,7 +48,7 @@ int main(int argc, char const *argv[]) {
         }
     }
 
-    if (read_bitmap_file(bitmapfile, memory, LEN_1_MB, 2, output_num) == -1) {
+    if (read_bitmap_file(bitmapfile, memory, LEN_1_MB, output_num) == -1) {
         perror("failed in read_bitmap_file()");
         _exit(EXIT_FAILURE);
     }
@@ -57,26 +57,6 @@ int main(int argc, char const *argv[]) {
     fclose(bitmapfile);
     fclose(datafile);
     return 0;
-}
-
-FILE* init_bitmap_file(const char *memory, size_t len, long c) {
-    FILE *file;
-    long i;
-    int fd;
-
-    file = tmpfile();
-    if (file == NULL) {
-        return NULL;
-    }
-    fd = fileno(file);
-
-    for (i = 0; i < c; ++i) {
-        if (pwrite(fd, memory, len, i * len) < 0) {
-            return NULL;
-        }
-    }
-
-    return file;
 }
 
 FILE* open_data_file(const char *path) {
@@ -92,7 +72,7 @@ long read_num_from_data_file(FILE *file, struct linebuf_t *linebuf) {
 
 int set_bitmap_file(FILE *file, long off) {
     int fd = fileno(file);
-    char buf;
+    char buf = 0;
 
     if (pread(fd, &buf, 1, off >> 3) == -1) {
         return -1;
@@ -105,19 +85,33 @@ int set_bitmap_file(FILE *file, long off) {
     return 0;
 }
 
-int read_bitmap_file(FILE *file, char *memory, size_t len, long c, read_bitmap_file_cb callback) {
+int read_bitmap_file(FILE *file, char *memory, size_t len, read_bitmap_file_cb callback) {
     int fd = fileno(file);
-    long i;
+    long i, c;
     size_t j;
     int k;
     char buf;
+    struct stat st;
+    ssize_t readn;
+
+    if (fstat(fd, &st) == -1) {
+        return -1;
+    }
+    c = 1 + ((st.st_size - 1) / len);
 
     for (i = 0; i < c; ++i) {
-        if (pread(fd, memory, len, i * len) == -1) {
+        memset(memory, 0, len);
+        if ((readn = pread(fd, memory, len, i * len)) == -1) {
             return -1;
+        }
+        if (readn == 0) {
+            continue;
         }
         for (j = 0; j < len; ++j) {
             buf = memory[j];
+            if (buf == 0) {
+                continue;
+            }
             for (k = 0; k < 8; ++k) {
                 if ((buf >> (7 - k)) & 1) {
                     callback(((i * len) << 3) + (j << 3) + k);
