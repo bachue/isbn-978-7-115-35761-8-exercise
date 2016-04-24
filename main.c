@@ -97,7 +97,7 @@ int set_bitmap_file(FILE *file, long off) {
     if (pread(fd, &buf, 1, off >> 3) == -1) {
         return -1;
     }
-    buf |= 1 << (8 - (off % 8));
+    buf |= 1 << (7 - (off % 8));
 
     if (pwrite(fd, &buf, 1, off >> 3) == -1) {
         return -1;
@@ -119,7 +119,7 @@ int read_bitmap_file(FILE *file, char *memory, size_t len, long c, read_bitmap_f
         for (j = 0; j < len; ++j) {
             buf = memory[j];
             for (k = 0; k < 8; ++k) {
-                if ((buf >> (8 - k)) & 1) {
+                if ((buf >> (7 - k)) & 1) {
                     callback(((i * len) << 3) + (j << 3) + k);
                 }
             }
